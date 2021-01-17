@@ -1,0 +1,119 @@
+version: '2.1'
+
+volumes:
+  files:
+    driver: local
+  mysql:
+    driver: local
+  backup:
+    driver: local
+  redis:
+    driver: local
+
+   
+services:
+  nginx:
+     image: jwilder/nginx-proxy
+     container_name: nginx
+     volumes: 
+       - /var/run/docker.sock:/tmp/docker.sock:ro
+       - /root/Nginx/client_max_body_size.conf:/etc/nginx/conf.d/client_max_body_size.conf:ro 
+       - /etc/nginx/certs ## SSL 
+       - /etc/nginx/vhost.d ## SSL
+       - /usr/share/nginx/html ## SSL
+     ports: 
+       - 80:80
+      
+  letsencrypt:
+    image:  jrcs/letsencrypt-nginx-proxy-companion
+    container_name: ssl
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/acme.sh
+    volumes_from:
+      - nginx     
+    environment:
+      - DEFAULT_EMAIL=<Mail>
+
+
+  jekyll:
+     image: jekyll/jekyll:3.8
+     container_name: blog
+     restart: always
+     volumes:
+       - <Blog_Path>:/srv/jekyll  
+     expose:
+       - 4000
+     environment:
+       - JEKYLL_UID=1001 
+       - JEKYLL_GID=1001 
+       - VIRTUAL_HOST=morbois.fr
+       - VIRTUAL_PORT=4000 
+       - LETSENCRYPT_HOST=morbois.fr
+     command: ["sh","-c"," bundle pack; jekyll serve"]
+
+  
+  owncloud:
+    image: owncloud/server:${OWNCLOUD_VERSION}
+    container_name: owncloud
+    restart: always
+    expose:
+      - 8080
+    depends_on:
+      - db
+      - redis
+    environment:
+      - OWNCLOUD_DOMAIN=${OWNCLOUD_DOMAIN}
+      - OWNCLOUD_DB_TYPE=mysql
+      - OWNCLOUD_DB_NAME=owncloud
+      - OWNCLOUD_DB_USERNAME=owncloud
+      - OWNCLOUD_DB_PASSWORD=owncloud
+      - OWNCLOUD_DB_HOST=db
+      - OWNCLOUD_ADMIN_USERNAME=${ADMIN_USERNAME}
+      - OWNCLOUD_ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - OWNCLOUD_MYSQL_UTF8MB4=true
+      - OWNCLOUD_REDIS_ENABLED=true
+      - OWNCLOUD_REDIS_HOST=redis
+      - VIRTUAL_HOST=owncloud.morbois.fr  
+      - VIRTUAL_PORT=8080
+      - LETSENCRYPT_HOST=owncloud.morbois.fr
+        
+    healthcheck:
+      test: ["CMD", "/usr/bin/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - files:/mnt/data
+
+  db:
+    image: webhippie/mariadb:latest
+    restart: always
+    environment:
+      - MARIADB_ROOT_PASSWORD=<pwd>
+      - MARIADB_USERNAME=<pwd>
+      - MARIADB_PASSWORD=<pwd>
+      - MARIADB_DATABASE=<pwd>
+      - MARIADB_MAX_ALLOWED_PACKET=128M
+      - MARIADB_INNODB_LOG_FILE_SIZE=64M
+    healthcheck:
+      test: ["CMD", "/usr/bin/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - mysql:/var/lib/mysql
+      - backup:/var/lib/backup
+
+  redis:
+    image: webhippie/redis:latest
+    restart: always
+    environment:
+      - REDIS_DATABASES=1
+    healthcheck:
+      test: ["CMD", "/usr/bin/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - redis:/var/lib/redis
