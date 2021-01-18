@@ -117,3 +117,34 @@ services:
       retries: 5
     volumes:
       - redis:/var/lib/redis
+
+  wireguard:
+    image: ghcr.io/linuxserver/wireguard
+    container_name: wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - VIRTUAL_HOST=vpn.morbois.fr
+      - VIRTUAL_PORT=51820
+      - LETSENCRYPT_HOST=vpn.morbois.fr
+      - PUID=1001
+      - PGID=1001
+      - TZ=Europe/Paris
+      - SERVERURL=auto   #vpn.morbois.com #optional
+      - SERVERPORT=51820 #optional
+      - PEERS=Antoine #optional
+      - PEERDNS=auto #optional
+        #- INTERNAL_SUBNET=10.13.13.0 #optional
+      - ALLOWEDIPS=0.0.0.0/0 #optional
+    volumes:
+      - /root/Wireguard/:/config
+      - /lib/modules:/lib/modules
+    ports:
+      - 51820:51820/udp
+    expose:
+      - 51820
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+
