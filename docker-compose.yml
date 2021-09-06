@@ -1,4 +1,11 @@
-version: '2.1'
+networks:
+  custom_net:
+     ipam:
+       driver: default
+       config:
+          - subnet: 172.0.0.0/16
+
+
 
 volumes:
   files:
@@ -10,53 +17,73 @@ volumes:
   redis:
     driver: local
 
-   
+
 services:
-  nginx:
+   nginx:
      image: jwilder/nginx-proxy
+     networks :
+       custom_net:
+               ipv4_address: 172.0.0.10   ## 172.0.0.1 already used
+
      container_name: nginx
-     volumes: 
+     volumes:
        - /var/run/docker.sock:/tmp/docker.sock:ro
-       - /root/Nginx/client_max_body_size.conf:/etc/nginx/conf.d/client_max_body_size.conf:ro 
-       - /etc/nginx/certs ## SSL 
+       - /root/Nginx/client_max_body_size.conf:/etc/nginx/conf.d/client_max_body_size.conf:ro
+       - /etc/nginx/certs ## SSL
        - /etc/nginx/vhost.d ## SSL
        - /usr/share/nginx/html ## SSL
-     ports: 
+         #- /root/nginx/vhost.d:/etc/nginx/conf
+     ports:
        - 80:80
-      
-  letsencrypt:
-    image:  jrcs/letsencrypt-nginx-proxy-companion
+       - 443:443 ## SSL
+
+
+   letsencrypt:
+    image:  jrcs/letsencrypt-nginx-proxy-companion:v1.13.1
+
+    networks :
+       custom_net:
+          ipv4_address: 172.0.0.2
+
+
     container_name: ssl
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /etc/acme.sh
     volumes_from:
-      - nginx     
+      - nginx
     environment:
-      - DEFAULT_EMAIL=<Mail>
+      - DEFAULT_EMAIL=antoine@morbois.fr
 
 
-  jekyll:
+   jekyll:
      image: jekyll/jekyll:3.8
+     networks :
+       custom_net:
+        ipv4_address: 172.0.0.3
      container_name: blog
      restart: always
      volumes:
-       - <Blog_Path>:/srv/jekyll  
+       - /root/Blog/:/srv/jekyll
      expose:
        - 4000
      environment:
-       - JEKYLL_UID=1001 
-       - JEKYLL_GID=1001 
+       - JEKYLL_UID=1001
+       - JEKYLL_GID=1001
        - VIRTUAL_HOST=morbois.fr
-       - VIRTUAL_PORT=4000 
+       - VIRTUAL_PORT=4000
        - LETSENCRYPT_HOST=morbois.fr
      command: ["sh","-c"," bundle pack; jekyll serve"]
 
-  
-  owncloud:
+   owncloud:
     image: owncloud/server:${OWNCLOUD_VERSION}
+    networks :
+      custom_net:
+       ipv4_address: 172.0.0.4
     container_name: owncloud
     restart: always
+    #ports:
+            #  - ${HTTP_PORT}:8080
     expose:
       - 8080
     depends_on:
@@ -65,29 +92,32 @@ services:
     environment:
       - OWNCLOUD_DOMAIN=${OWNCLOUD_DOMAIN}
       - OWNCLOUD_DB_TYPE=mysql
-      - OWNCLOUD_DB_NAME=owncloud
-      - OWNCLOUD_DB_USERNAME=owncloud
-      - OWNCLOUD_DB_PASSWORD=owncloud
+      - OWNCLOUD_DB_NAME=<pwd>
+      - OWNCLOUD_DB_USERNAME=<pwd>
+      - OWNCLOUD_DB_PASSWORD=<pwd>
       - OWNCLOUD_DB_HOST=db
       - OWNCLOUD_ADMIN_USERNAME=${ADMIN_USERNAME}
       - OWNCLOUD_ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - OWNCLOUD_MYSQL_UTF8MB4=true
       - OWNCLOUD_REDIS_ENABLED=true
       - OWNCLOUD_REDIS_HOST=redis
-      - VIRTUAL_HOST=owncloud.morbois.fr  
+      - VIRTUAL_HOST=owncloud.morbois.fr
       - VIRTUAL_PORT=8080
       - LETSENCRYPT_HOST=owncloud.morbois.fr
-        
+
     healthcheck:
       test: ["CMD", "/usr/bin/healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 5
     volumes:
-      - files:/mnt/data
+            - files:/mnt/data
 
-  db:
+   db:
     image: webhippie/mariadb:latest
+    networks :
+     custom_net:
+       ipv4_address: 172.0.0.5
     restart: always
     environment:
       - MARIADB_ROOT_PASSWORD=<pwd>
@@ -105,8 +135,11 @@ services:
       - mysql:/var/lib/mysql
       - backup:/var/lib/backup
 
-  redis:
+   redis:
     image: webhippie/redis:latest
+    networks :
+     custom_net:
+       ipv4_address: 172.0.0.6
     restart: always
     environment:
       - REDIS_DATABASES=1
@@ -118,9 +151,54 @@ services:
     volumes:
       - redis:/var/lib/redis
 
-  wireguard:
+   pihole:
+        container_name: pihole
+        networks :
+         custom_net:
+          ipv4_address: 172.0.0.7
+        image: pihole/pihole:latest
+        environment:
+         - VIRTUAL_HOST=pihole.morbois.fr
+         - LETSENCRYPT_HOST=pihole.morbois.fr
+           #- VIRTUAL_PORT=443/tcp
+           #- VIRTUAL_PORT=53/tcp
+           #- VIRTUAL_PORT=53/udp
+           #- VIRTUAL_PORT=67/udp
+         - VIRTUAL_PORT=80
+         - TZ= 'Europe/Paris'
+         - WEBPASSWORD= 'DP6=pbDRH8'
+        expose:
+           - 80
+           - 443
+           - 53/tcp
+           - 53/udp
+           - 67/udp
+           #ports:
+           #- 80/tcp
+           #- 443/tcp
+           #- 53/tcp
+           #- 53/udp
+           #- 67/udp
+
+        volumes:
+         - './etc-pihole/:/etc/pihole/'
+         - './etc-dnsmasq.d/:/etc/dnsmasq.d/'
+           #cap_add:
+           #- NET_ADMIN
+        restart: unless-stopped
+
+
+   wireguard:
     image: ghcr.io/linuxserver/wireguard
+    networks :
+     custom_net:
+        ipv4_address: 172.0.0.8
     container_name: wireguard
+    depends_on:
+      - pihole
+    dns:
+        # - pihole
+      - 172.0.0.7
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
@@ -147,4 +225,3 @@ services:
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
     restart: unless-stopped
-
